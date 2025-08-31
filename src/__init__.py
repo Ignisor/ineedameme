@@ -6,6 +6,12 @@ from .core import (
     SimpleTemplateMatcher,
     TemplatePicker,
     OpenRouterTemplateMatcher,
+    ImageEditPromptGenerator,
+    ImageDownloader,
+    DownloadedImage,
+    GeneratedImage,
+    MemeImageGenerator,
+    SafetyRefusalError,
 )
 from .clients import OpenRouterClient
 
@@ -17,5 +23,11 @@ __all__ = [
     "SimpleTemplateMatcher",
     "TemplatePicker",
     "OpenRouterTemplateMatcher",
+    "ImageEditPromptGenerator",
+    "ImageDownloader",
+    "DownloadedImage",
+    "GeneratedImage",
+    "MemeImageGenerator",
+    "SafetyRefusalError",
     "OpenRouterClient",
 ]

@@ -1,162 +1,148 @@
-# AI MemeGen - Situational Meme Generator
+# AI MemeGen — "I need a MEME"
 
-A hackathon project that leverages AI to generate contextual memes based on user descriptions and optional customizations.
+Generate situational memes from a short description, optionally swapping in a face from an uploaded image or URL. The app picks a meme template, crafts an edit prompt, and calls an image model to produce the final meme.
 
-## 🎯 Project Overview
+## What it does
 
-"I need a MEME" is a situational meme generation and lookup application that combines the power of text AI and image generation to create personalized memes. Users can describe situations or desired memes, and the system intelligently matches them with appropriate templates from the Memegen.link API, then generates custom content using Gemini 2.5 Flash Image Preview.
+- Selects a suitable meme template from `meme_templates.json` (derived from Memegen.link)
+- Downloads the template image
+- Optionally takes a reference face (file or URL)
+- Asks a text model to produce a concise edit instruction
+- Asks an image model to generate the final meme
+- Returns a `data:` URI you can render or download
 
-## 🚀 Core Features
+Backend is FastAPI; the UI is a single static page served by the backend.
 
-### Key Capabilities
-- **Situational Meme Generation**: Transform any situation description into a relevant meme
-- **Intelligent Template Matching**: AI-powered selection of the most suitable meme template
-- **Custom Face Integration**: Replace main characters with uploaded face references
-- **AI-Powered Content Generation**: Dynamic text and visual content creation
-- **Real-time Preview**: Instant meme generation and display
+## Requirements
 
-### User Journey
-1. **Describe**: User inputs situation or meme concept + optional face reference
-2. **Match**: AI finds the perfect template from Memegen.link's library
-3. **Generate**: AI creates appropriate text and visual content
-4. **Assemble**: System combines template, content, and custom faces
-5. **Deliver**: Generated meme is displayed to user
+- Python 3.12+
+- An OpenRouter API key (free-tier models supported)
 
-## 🛠 Technical Architecture
+## Quickstart
 
-### Technology Stack
-- **Frontend**: Simple HTML/CSS/JavaScript interface
-- **Backend**: Python with FastAPI
-- **AI Services**: Google Gemini for all AI operations
-  - Template matching and selection
-  - Content generation and prompt creation
-  - Image generation with Gemini 2.5 Flash Image Preview
-- **External APIs**: Memegen.link for template discovery and reference
+```bash
+python3.12 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
 
-### Key Components
+export OPENROUTER_API_KEY="<your_openrouter_api_key>"
+uvicorn src.api:app --reload
+# Open http://localhost:8000/
+```
 
-#### 1. Template Matching Engine
-- Uses Gemini to analyze all 207 available meme templates
-- Sends user situation + template list (ID + name) to Gemini
-- Returns top 3 ranked templates with confidence weights
-- Selects best template based on AI ranking
+Alternatively, you can run the built-in entrypoint:
 
-#### 2. Content Generation Module
-- Uses Gemini to generate appropriate meme text based on situation
-- Creates comprehensive prompts for Gemini 2.5 Flash Image Preview
-- Handles context-aware content creation and humor adaptation
+```bash
+export OPENROUTER_API_KEY="<your_openrouter_api_key>"
+python -m src.api
+```
 
-#### 3. Face Integration System
-- Processes uploaded face references
-- Uses Gemini to convert face images to descriptive prompts
-- Integrates face descriptions into image generation prompts
-- Handles face upload validation and processing
+## Configuration
 
-#### 4. Meme Assembly Pipeline
-- Orchestrates all Gemini AI operations
-- Combines template style, situation, and face references
-- Manages Gemini 2.5 Flash Image Preview generation
-- Handles different output formats and quality settings
+- `OPENROUTER_API_KEY` (required): API key used by `src/clients.py`.
+- `PORT` (optional): Port for the built-in runner in `src/api.py` (defaults to `8000`).
 
-## 📋 Implementation Plan (2-Day Sprint)
+## Endpoints
 
-### Day 1: Core PoC Development
-- [X] **Morning**: Project setup + Gemini API integration
-- [X] **Afternoon**: Memegen.link API integration + template fetching
-- [ ] **Evening**: Core pipeline: situation → template selection → content generation → image generation
+### GET `/`
+Serves the static UI from `static/index.html`.
 
-### Day 2: Interface & Polish
-- [ ] **Morning**: CLI interface for testing + face upload handling
-- [ ] **Afternoon**: FastAPI backend + basic web interface
-- [ ] **Evening**: Demo preparation + error handling
+### POST `/meme`
+Create a meme. Expects a multipart form:
 
-### Core PoC Pipeline
-1. ✅ Load 207 templates from local JSON file (pre-fetched from Memegen.link)
-2. ✅ Send situation + template list to Gemini for selection
-3. ✅ Process Gemini response to get best template
-4. ✅ Send situation + template to Gemini for content generation
-5. ✅ Create image generation prompt
-6. ✅ Send to Gemini 2.5 Flash for image generation
-7. ✅ Save result to local file
-8. ✅ CLI interface for testing
+- `description` (string, required)
+- `reference_url` (string, optional)
+- `reference_file` (file, optional; image)
 
-## 🎨 User Interface Design (MVP)
+Response (200):
 
-### Minimal Interface
-- **Text Input**: Simple textarea for situation description
-- **File Upload**: Basic file input for face reference (optional)
-- **Generate Button**: One big button to create meme
-- **Result Display**: Show generated meme image
-- **Loading State**: Simple spinner while generating
+```json
+{
+  "mime_type": "image/png",
+  "data_uri": "data:image/png;base64,...",
+  "template_id": "stonks",
+  "template_name": "Stonks"
+}
+```
 
-### Design Philosophy
-- Function over form - get it working first
-- Single page application
-- Minimal CSS, focus on functionality
+Possible errors:
+- 400 if the model refuses for safety/policy reasons
+- 400 if `description` is missing
+- 500 on other failures
 
-## 🔧 Technical Requirements
+Curl examples:
 
-### Dependencies
-- Python 3.8+
-- Web framework (FastAPI/Flask)
-- AI/ML libraries for text processing
-- HTTP client for API calls
-- Frontend framework (if needed)
+```bash
+# With only a description
+curl -s -X POST \
+  -F "description=When your Friday deploy actually works" \
+  http://localhost:8000/meme | jq .
 
-### API Integrations
-- **Memegen.link API**: Template discovery and reference (207 templates)
-- **Google Gemini API**: All AI operations (template matching, content generation, image generation)
+# With a face image file
+curl -s -X POST \
+  -F "description=Make a Stonks meme with this face" \
+  -F "reference_file=@/path/to/face.png" \
+  http://localhost:8000/meme | jq .
 
-## 🎯 Success Metrics (2-Day MVP)
+# With a face image URL
+curl -s -X POST \
+  -F "description=It finally compiles" \
+  -F "reference_url=https://example.com/face.jpg" \
+  http://localhost:8000/meme | jq .
+```
 
-### Technical Goals
-- ✅ Working meme generation (under 30 seconds)
-- ✅ Basic template matching (5-10 templates)
-- ✅ Simple face upload integration
-- ✅ Functional web interface
+### GET `/memes/background`
+Returns a random list of template image URLs, used by the UI for the background grid.
 
-### Demo Goals
-- ✅ Live meme generation from user input
-- ✅ Face replacement demonstration
-- ✅ Show AI coordination between services
-- ✅ Demonstrate the core concept works
+Query params:
+- `count` (int, default 60)
 
-## 🚧 Challenges & Considerations
+Response:
 
-### Technical Challenges
-- **Template Matching Accuracy**: Ensuring AI correctly identifies appropriate templates
-- **Face Replacement Quality**: Maintaining natural appearance when replacing faces
-- **API Rate Limits**: Managing external API usage efficiently
-- **Image Processing Performance**: Optimizing for fast generation
+```json
+{ "images": ["https://...", "https://..."] }
+```
 
-### User Experience Challenges
-- **Input Clarity**: Helping users provide effective descriptions
-- **Expectation Management**: Setting realistic expectations for AI generation
-- **Error Handling**: Graceful handling of generation failures
+## Web UI
 
-## 🎉 Demo Features
+Open `http://localhost:8000/`. Enter a description, optionally upload a face or provide an image URL, then press Generate. The result appears inline and can be downloaded.
 
-### Live Demo Capabilities
-- Real-time meme generation from user input
-- Face replacement demonstration
-- Template browsing and selection
-- Multiple output format options
+## How it works (architecture)
 
-### Presentation Points
-- AI-powered template matching showcase
-- Custom face integration demonstration
-- Speed and quality of generation
-- User-friendly interface walkthrough
+- `src/core.py`
+  - `TemplateRepository` loads templates from `meme_templates.json`
+  - `OpenRouterTemplateMatcher` ranks templates via OpenRouter (model: `google/gemini-2.5-flash-image-preview:free`)
+  - `ImageDownloader` fetches the blank template image
+  - `ImageEditPromptGenerator` asks a text model for a concise edit instruction
+  - `MemeImageGenerator` asks an image model to produce one final image and returns it as bytes
+- `src/api.py`
+  - Defines FastAPI app and endpoints
+  - Serves static UI from `static/`
 
-## 📝 Future Enhancements
+Important: reference images and template images are sent to OpenRouter (embedded in the request as `data:` URIs). Do not upload sensitive content.
 
-### Post-Hackathon Possibilities
-- Template creation and sharing
-- Community meme gallery
-- Advanced AI features (style transfer, etc.)
-- Mobile app development
-- Social media integration
+## Development
 
----
+- Run the server in dev mode:
 
-*This project demonstrates the power of combining multiple AI services to create engaging, personalized content generation tools.*
+  ```bash
+  uvicorn src.api:app --reload
+  ```
+
+- Logs use the `ai.memegen` logger; request flow includes correlation IDs.
+- A small programmatic example exists in `test.py` (writes `generated_image.png`). Adjust the hardcoded example before using.
+
+## Troubleshooting
+
+- "OpenRouter API key not provided" — set `OPENROUTER_API_KEY` in your environment
+- 400 with a refusal message — the model declined for safety/policy reasons; try changing the description
+- 500 generating image — transient issues; retry, or check connectivity and logs
+
+## Attribution
+
+- Templates: Memegen.link (`meme_templates.json`)
+- Models via OpenRouter — using `google/gemini-2.5-flash-image-preview:free`
+
+## License
+
+No license specified. Use at your own risk.

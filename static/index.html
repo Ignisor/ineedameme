@@ -1,0 +1,335 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>I need a MEME</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/animate.css/4.1.1/animate.min.css" />
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.3/dist/confetti.browser.min.js"></script>
+    <style>
+        body {
+            font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+        }
+    </style>
+</head>
+
+<body class="bg-slate-950 text-slate-100 min-h-screen relative">
+    <!-- Background grid -->
+    <div aria-hidden="true" class="pointer-events-none fixed inset-0 -z-10">
+        <div id="bg-grid"
+            class="absolute inset-0 grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 gap-1 opacity-90">
+            <!-- Tiles inserted by JS -->
+        </div>
+        <div class="absolute inset-0 bg-slate-950/80"></div>
+    </div>
+
+    <div class="max-w-2xl mx-auto px-4 py-10 relative" x-data="memeApp()" x-init="init()">
+        <header class="text-center mb-8">
+            <h1 class="text-4xl font-extrabold tracking-tight">I need a <span class="text-fuchsia-400">MEME</span></h1>
+            <p class="text-slate-400 mt-2">Describe the cringe. Optionally upload a face. Hit generate.</p>
+        </header>
+
+        <form id="meme-form" class="bg-slate-900/60 backdrop-blur rounded-xl border border-slate-800 p-5 space-y-4"
+            @submit.prevent="submit">
+            <div>
+                <label for="description" class="block text-sm font-semibold mb-2">Description</label>
+                <textarea id="description" name="description" rows="4" required x-ref="description"
+                    :placeholder="placeholder" @input="onDescriptionInput" @focus="onDescriptionFocus"
+                    @blur="onDescriptionBlur"
+                    class="w-full resize-y rounded-lg bg-slate-900 border border-slate-800 focus:border-fuchsia-500 focus:ring-2 focus:ring-fuchsia-500/20 outline-none p-3"></textarea>
+                <!-- <p class="text-xs text-slate-500 mt-1">Tip: Be specific. The AI likes spicy context.</p> -->
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                    <label for="reference_file" class="block text-sm font-semibold mb-2">Reference face (image)</label>
+                    <input id="reference_file" name="reference_file" type="file" accept="image/*"
+                        class="block w-full text-sm text-slate-300 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-fuchsia-600 file:text-white hover:file:bg-fuchsia-500" />
+                </div>
+                <div>
+                    <label for="reference_url" class="block text-sm font-semibold mb-2">Or image URL</label>
+                    <input id="reference_url" name="reference_url" type="url" placeholder="https://example.com/face.png"
+                        class="w-full rounded-lg bg-slate-900 border border-slate-800 focus:border-fuchsia-500 focus:ring-2 focus:ring-fuchsia-500/20 outline-none p-3" />
+                </div>
+            </div>
+
+            <div class="flex items-center gap-3">
+                <button type="submit" :disabled="loading"
+                    class="inline-flex items-center gap-2 rounded-lg bg-fuchsia-600 hover:bg-fuchsia-500 disabled:opacity-60 disabled:cursor-not-allowed px-5 py-2.5 font-semibold">
+                    <svg x-show="!loading" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"
+                        class="w-5 h-5">
+                        <path
+                            d="M12 3a1 1 0 0 1 1 1v6.586l2.293-2.293a1 1 0 1 1 1.414 1.414l-4 4a1 1 0 0 1-1.414 0l-4-4A1 1 0 0 1 8.293 8.293L10.586 10.586V4a1 1 0 0 1 1-1z" />
+                        <path
+                            d="M5 13a1 1 0 0 1 1 1v3h12v-3a1 1 0 1 1 2 0v4a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-4a1 1 0 0 1 1-1z" />
+                    </svg>
+                    <svg x-show="loading" class="animate-spin h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none"
+                        viewBox="0 0 24 24">
+                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4">
+                        </circle>
+                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path>
+                    </svg>
+                    <span x-text="loading ? 'Summoning cringe…' : 'Generate' "></span>
+                </button>
+                <span class="text-slate-400 text-sm" x-show="showHints" x-text="hint"></span>
+            </div>
+        </form>
+
+        <section id="result" class="mt-8 hidden" :class="{ 'hidden': !hasResult }">
+            <div class="rounded-xl border border-slate-800 bg-slate-900/60 p-4">
+                <p class="text-sm text-rose-400 mb-3" x-text="error" x-show="error"></p>
+                <img x-ref="memeImg" alt="Generated meme" class="mx-auto rounded-lg shadow-lg animate__animated"
+                    x-show="imageSrc" :src="imageSrc" @load="onImageLoad" />
+                <div class="mt-4 flex justify-end" x-show="imageSrc">
+                    <button type="button" @click="downloadImage"
+                        class="inline-flex items-center gap-2 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 px-4 py-2 text-sm font-semibold">
+                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-5 h-5">
+                            <path
+                                d="M12 3a1 1 0 0 1 1 1v8.586l2.293-2.293a1 1 0 1 1 1.414 1.414l-4 4a1 1 0 0 1-1.414 0l-4-4A1 1 0 1 1 8.293 10.293L10.586 12.586V4a1 1 0 0 1 1-1z" />
+                            <path
+                                d="M5 15a1 1 0 0 1 1 1v2h12v-2a1 1 0 1 1 2 0v3a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-3a1 1 0 0 1 1-1z" />
+                        </svg>
+                        <span>Download</span>
+                    </button>
+                </div>
+            </div>
+        </section>
+
+        <footer class="mt-10 text-center text-xs text-slate-500">
+            Powered by <span class="text-fuchsia-400">Gemini 2.5 Flash Image Preview</span>
+            and <span class="text-fuchsia-400">Memegen.link API</span>.
+            Vibe-coded with <span class="text-fuchsia-400">FastAPI</span> +
+            vanilla JS.
+            <br> Be nice to the servers pls.
+        </footer>
+    </div>
+
+    <script>
+        function memeApp() {
+            return {
+                loading: false,
+                hasResult: false,
+                imageSrc: '',
+                error: '',
+                hint: '',
+                placeholder: 'Situation when you have a new fancy screwdriver but have nothing to screw, so you desperately try to find something to screw in or out...',
+                showHints: false,
+                examplePlaceholders: [
+                    "When your LinkedIn post gets 1 like (and it's your mom)",
+                    "Deploying to prod on Friday at 4:59pm like a boss",
+                    "It works. No idea why. Ship it.",
+                    "When you say 'let's circle back' to your cat",
+                    "First day gym selfie: 'no pain no gain' energy",
+                    "Designer hands you a 17px font with conviction",
+                    "Standup update: 'Blocked by reality'",
+                    "Sprint velocity is just a light jog today",
+                    "When AI refuses to generate the image",
+                    "When AI meme generator makes some shitty cringe image",
+                    "When stupid machine does not what you want it to do",
+                    "When boss asked to create an AI something",
+                ],
+                _exampleIntervalId: null,
+                _exampleTimeoutId: null,
+                _hintIntervalId: null,
+                hints: [
+                    'Try describing a specific awkward moment.',
+                    'Upload a face for extra spice.',
+                    'Short + punchy descriptions tend to slap.',
+                    'Weekday mood? Weekend chaos? Tell me.',
+                    'Embrace the cringe.',
+                    'Add a punchline or a vibe word.',
+                    'Reference a meme format if you have one in mind.',
+                    'Roast yourself. The internet respects bravery.',
+                    'If it\'s cursed, it\'s probably correct.',
+                    'Use CAPS for maximum embarrassment.',
+                    'Describe the most corporate thing you said today.',
+                    'Promise a "quick fix" and then don\'t fix it.',
+                    'Tell me about the ticket that haunts your dreams.',
+                    'Make it overly dramatic for no reason.',
+                    'Blame the compiler. It understands.',
+                    'Add a fake inspirational quote at the end.',
+                    'Confess the production hotfix. Be brave.',
+                    'Touch grass. Then come back and type.',
+                    'Plot twist: AI hallucinated the requirement.',
+                    'Write like a Slack message at 1:37am.',
+                    'Be passive aggressive. Professionally.',
+                    'Use “for legal reasons that\'s a joke”.',
+                    'Add “bro” for instant cringe amplification.',
+                ],
+                async init() {
+                    try { await this.loadBackgroundGrid(); } catch (_) { }
+                    this.startPlaceholderRotation();
+                },
+                async loadBackgroundGrid() {
+                    const container = document.getElementById('bg-grid');
+                    if (!container) return;
+                    const res = await fetch('/memes/background?count=60');
+                    if (!res.ok) return;
+                    const data = await res.json();
+                    const urls = (data && data.images) || [];
+                    container.innerHTML = '';
+                    for (const url of urls) {
+                        const tile = document.createElement('div');
+                        tile.className = 'w-full h-24 sm:h-28 md:h-32 lg:h-36 xl:h-40 rounded-md overflow-hidden bg-slate-800';
+                        const img = document.createElement('img');
+                        img.src = url;
+                        img.alt = '';
+                        img.loading = 'lazy';
+                        img.className = 'w-full h-full object-cover object-center';
+                        tile.appendChild(img);
+                        container.appendChild(tile);
+                    }
+                },
+                rotateHint() {
+                    this.hint = this.hints[Math.floor(Math.random() * this.hints.length)];
+                },
+                pickRandomExample() {
+                    if (!this.examplePlaceholders || this.examplePlaceholders.length === 0) return '';
+                    return this.examplePlaceholders[Math.floor(Math.random() * this.examplePlaceholders.length)];
+                },
+                startPlaceholderRotation() {
+                    const el = this.$refs.description;
+                    if (!el) return;
+                    if ((el.value || '').trim().length > 0) {
+                        this.stopPlaceholderRotation();
+                        return;
+                    }
+                    if (this._exampleIntervalId || this._exampleTimeoutId) return;
+                    this._exampleTimeoutId = setTimeout(() => {
+                        this.placeholder = this.pickRandomExample();
+                        this._exampleIntervalId = setInterval(() => {
+                            if ((el.value || '').trim().length === 0) {
+                                this.placeholder = this.pickRandomExample();
+                            } else {
+                                this.stopPlaceholderRotation();
+                            }
+                        }, 5000);
+                        this._exampleTimeoutId = null;
+                    }, 2500);
+                },
+                stopPlaceholderRotation() {
+                    if (this._exampleTimeoutId) {
+                        clearTimeout(this._exampleTimeoutId);
+                        this._exampleTimeoutId = null;
+                    }
+                    if (this._exampleIntervalId) {
+                        clearInterval(this._exampleIntervalId);
+                        this._exampleIntervalId = null;
+                    }
+                    this.placeholder = '';
+                },
+                onDescriptionInput(e) {
+                    const val = (e && e.target && e.target.value) ? e.target.value.trim() : '';
+                    if (val.length > 0) {
+                        this.stopPlaceholderRotation();
+                    } else {
+                        this.startPlaceholderRotation();
+                    }
+                },
+                onDescriptionFocus() {
+                    const el = this.$refs.description;
+                    if (el && (el.value || '').trim().length === 0) {
+                        this.startPlaceholderRotation();
+                    }
+                },
+                onDescriptionBlur() {
+                    const el = this.$refs.description;
+                    if (el && (el.value || '').trim().length === 0) {
+                        this.startPlaceholderRotation();
+                    } else {
+                        this.stopPlaceholderRotation();
+                    }
+                },
+                async submit() {
+                    // Show rotating hints only after first generate
+                    if (!this.showHints) {
+                        this.showHints = true;
+                        this.rotateHint();
+                        if (!this._hintIntervalId) {
+                            this._hintIntervalId = setInterval(() => this.rotateHint(), 4000);
+                        }
+                    }
+                    this.loading = true;
+                    this.error = '';
+                    this.imageSrc = '';
+                    this.hasResult = true;
+                    const form = document.getElementById('meme-form');
+                    const fd = new FormData();
+                    const desc = form.querySelector('#description').value || '';
+                    fd.append('description', desc);
+                    const fileInput = form.querySelector('#reference_file');
+                    const file = fileInput && fileInput.files && fileInput.files[0];
+                    if (file && file.name) { fd.append('reference_file', file, file.name); }
+                    const url = (form.querySelector('#reference_url').value || '').trim();
+                    if (url) { fd.append('reference_url', url); }
+                    try {
+                        const res = await fetch('/meme', { method: 'POST', body: fd });
+                        let data;
+                        try { data = await res.json(); } catch (_) { data = null; }
+                        if (!res.ok) {
+                            throw new Error((data && (data.detail || data.message)) || `Failed: ${res.status}`);
+                        }
+                        if (data && data.data_uri) {
+                            this.imageSrc = data.data_uri;
+                            this.$nextTick(() => {
+                                if (window.confetti) {
+                                    confetti({ particleCount: 80, spread: 60, origin: { y: 0.6 } });
+                                }
+                            });
+                        } else {
+                            throw new Error('No image returned');
+                        }
+                    } catch (e) {
+                        this.error = e.message || String(e);
+                    } finally {
+                        this.loading = false;
+                    }
+                },
+                onImageLoad(e) {
+                    e.target.classList.remove('animate__fadeOut');
+                    e.target.classList.add('animate__fadeIn');
+                },
+                async downloadImage() {
+                    try {
+                        const src = this.imageSrc || '';
+                        if (!src) return;
+                        const ts = new Date().toISOString().replace(/[:.]/g, '-');
+                        const filename = `meme-${ts}.png`;
+                        // If it's a data URI, we can download directly
+                        if (src.startsWith('data:')) {
+                            const link = document.createElement('a');
+                            link.href = src;
+                            link.download = filename;
+                            document.body.appendChild(link);
+                            link.click();
+                            link.remove();
+                            return;
+                        }
+                        // Otherwise fetch as blob and download
+                        const res = await fetch(src, { cache: 'no-store' });
+                        if (!res.ok) throw new Error('Download failed');
+                        const blob = await res.blob();
+                        const url = URL.createObjectURL(blob);
+                        const a = document.createElement('a');
+                        a.href = url;
+                        a.download = filename;
+                        document.body.appendChild(a);
+                        a.click();
+                        a.remove();
+                        URL.revokeObjectURL(url);
+                    } catch (_) {
+                        // Best-effort: no user-facing error needed here
+                    }
+                }
+            }
+        }
+    </script>
+</body>
+
+</html>

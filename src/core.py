@@ -3,8 +3,12 @@ from __future__ import annotations
 import json
 import random
 from dataclasses import dataclass
+import logging
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any, Dict, Iterable, List, Optional, Tuple
+import base64
+import mimetypes
+import requests
 
 
 @dataclass(frozen=True)
@@ -223,3 +227,367 @@ class OpenRouterTemplateMatcher(TemplateMatcher):
             except Exception:
                 pass
         return data
+
+
+class ImageEditPromptGenerator:
+    """
+    Generates a concise instruction for an image generation model to edit a meme template
+    based on a user description, selected template, and an optional reference image.
+
+    The prompt is created by a text model via OpenRouter. If a reference image path is provided,
+    it is attached as an inline image in the user message following OpenAI-compatible schema
+    supported by OpenRouter multi-part content.
+    """
+
+    _client: Any
+    _model: str
+
+    def __init__(
+        self,
+        client: Optional[Any] = None,
+        model: str = "google/gemini-2.5-flash-image-preview:free",
+    ) -> None:
+        from .clients import OpenRouterClient
+
+        self._client = client or OpenRouterClient()
+        self._model = model
+
+    def create_prompt(
+        self,
+        user_description: str,
+        template: MemeTemplate,
+        template_image: Optional["DownloadedImage"] = None,
+        reference_image: Optional["DownloadedImage"] = None,
+    ) -> str:
+        system_msg = {
+            "role": "system",
+            "content": (
+                "You are a prompt engineer for image editing. "
+                "Given a meme template and user's description, output a single, concise, "
+                "imperative instruction that tells an image generation model exactly how to "
+                "edit the template. Keep it under 120 words. Avoid extra commentary."
+            ),
+        }
+
+        user_content: List[Dict[str, Any]] = []
+
+        # Instruction text first (per OpenRouter docs)
+        user_content.append(
+            {
+                "type": "text",
+                "text": (
+                    "Create a concise edit instruction for an image generation model.\n"
+                    f"Template: {template.name}.\n"
+                    f"User description: {user_description}.\n"
+                    "Constraints: One short paragraph; specify text lines if applicable; "
+                    "mention placement (top/bottom/overlay) based on template lines; "
+                    "describe visual changes succinctly; avoid mentioning file paths."
+                ),
+            }
+        )
+
+        # Attach provided template image if available
+        if template_image is not None:
+            try:
+                user_content.append(
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": template_image.as_data_uri()},
+                    }
+                )
+            except Exception:
+                pass
+
+        # Attach provided reference image if available
+        if reference_image is not None:
+            try:
+                user_content.append(
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": reference_image.as_data_uri()},
+                    }
+                )
+            except Exception:
+                pass
+
+        # No file or network I/O here; images must be provided by caller
+
+        messages = [system_msg, {"role": "user", "content": user_content}]  # type: ignore[dict-item]
+
+        content = self._client.chat(messages=messages, model=self._model, temperature=0.8, max_tokens=256)
+        return content.strip()
+
+
+@dataclass(frozen=True)
+class DownloadedImage:
+    url: str
+    content: bytes
+    mime_type: str
+
+    def as_data_uri(self) -> str:
+        encoded = base64.b64encode(self.content).decode("utf-8")
+        return f"data:{self.mime_type};base64,{encoded}"
+
+
+class SafetyRefusalError(Exception):
+    """Raised when the model refuses to generate due to safety/policy."""
+
+    def __init__(self, message: str) -> None:
+        super().__init__(message)
+
+
+class ImageDownloader:
+    _timeout: float
+
+    def __init__(self, timeout: float = 30.0) -> None:
+        self._timeout = timeout
+
+    def download(self, url: str) -> DownloadedImage:
+        # Single retry on transient failure
+        last_error: Optional[Exception] = None
+        for attempt in range(2):
+            try:
+                resp = requests.get(url, timeout=self._timeout)
+                resp.raise_for_status()
+                content_type = resp.headers.get("Content-Type", "").split(";")[0].strip()
+                mime = content_type or self._guess_mime_from_url(url) or "image/png"
+                return DownloadedImage(url=url, content=resp.content, mime_type=mime)
+            except Exception as e:
+                last_error = e
+                if attempt == 1:
+                    raise
+                continue
+        # Satisfy type checker; in practice we either returned or raised
+        raise RuntimeError(f"Failed to download image from {url}: {last_error}")
+
+    def _guess_mime_from_url(self, url: str) -> str:
+        guess, _ = mimetypes.guess_type(url)
+        return guess or ""
+
+
+def _guess_mime_from_path(path: str) -> str:
+    guess, _ = mimetypes.guess_type(path)
+    return guess or "image/png"
+
+
+@dataclass(frozen=True)
+class GeneratedImage:
+    """Holds a single generated image output."""
+
+    mime_type: str
+    content: bytes
+
+    def as_data_uri(self) -> str:
+        encoded = base64.b64encode(self.content).decode("utf-8")
+        return f"data:{self.mime_type};base64,{encoded}"
+
+
+class MemeImageGenerator:
+    """
+    Creates a meme image using an image generation model via OpenRouter.
+
+    Input:
+    - prompt: text instruction for editing/creating the meme
+    - template_image: the meme template image as attachment (required by user request)
+    - reference_image: optional face/reference image
+
+    Output: a single image as GeneratedImage
+    """
+
+    _client: Any
+    _model: str
+    _logger: logging.Logger
+
+    def __init__(self, client: Optional[Any] = None, model: str = "google/gemini-2.5-flash-image-preview:free") -> None:
+        from .clients import OpenRouterClient
+
+        self._client = client or OpenRouterClient()
+        self._model = model
+        self._logger = logging.getLogger("ai.memegen")
+
+    def generate(
+        self,
+        prompt: str,
+        template_image: DownloadedImage,
+        reference_image: Optional[DownloadedImage] = None,
+        temperature: float = 0.2,
+        max_tokens: int = 256,
+    ) -> "GeneratedImage":
+        user_content: List[Dict[str, Any]] = []
+
+        # Put prompt text first
+        user_content.append({"type": "text", "text": prompt})
+
+        # Template image must be attached
+        user_content.append(
+            {
+                "type": "image_url",
+                "image_url": {"url": template_image.as_data_uri()},
+            }
+        )
+
+        # Optional reference image
+        if reference_image is not None:
+            user_content.append(
+                {
+                    "type": "image_url",
+                    "image_url": {"url": reference_image.as_data_uri()},
+                }
+            )
+
+        messages = [
+            {
+                "role": "system",
+                "content": (
+                    "You are an image generation model that outputs exactly one final image. "
+                    "Use the provided template and optional reference to produce the meme."
+                ),
+            },
+            {"role": "user", "content": user_content},  # type: ignore[dict-item]
+        ]
+
+        # Ask for raw JSON so we can extract image content
+        data = self._client.chat_raw(
+            messages=messages,
+            model=self._model,
+            temperature=temperature,
+            max_tokens=max_tokens,
+        )
+        return self._extract_generated_image(data)
+
+    def _parse_data_uri(self, data_uri: str) -> Tuple[str, bytes]:
+        # data:[<mime>];base64,<payload>
+        try:
+            header, b64 = data_uri.split(",", 1)
+            mime = "image/png"
+            if header.startswith("data:"):
+                rest = header[5:]
+                semi = rest.find(";")
+                if semi != -1:
+                    mime = rest[:semi] or mime
+                else:
+                    mime = rest or mime
+            payload = base64.b64decode(b64)
+            return mime, payload
+        except Exception as e:
+            raise RuntimeError(f"Invalid data URI: {e}")
+
+    def _summarize_openrouter_response(self, data: Dict[str, Any]) -> str:
+        """Create a concise, redacted summary of the OpenRouter response for logging/errors."""
+        try:
+            summary: Dict[str, Any] = {}
+            if isinstance(data, dict):
+                summary["object"] = data.get("object")
+                summary["model"] = data.get("model")
+                usage = data.get("usage")
+                if isinstance(usage, dict):
+                    summary["usage"] = usage
+                choices = data.get("choices")
+                if isinstance(choices, list) and choices:
+                    summary["choices_count"] = len(choices)
+                    first = choices[0]
+                    if isinstance(first, dict):
+                        msg = first.get("message")
+                        if isinstance(msg, dict):
+                            summary["message_keys"] = list(msg.keys())
+                            content = msg.get("content")
+                            if isinstance(content, str):
+                                summary["content_len"] = len(content)
+                            images = msg.get("images")
+                            if isinstance(images, list):
+                                summary["images_count"] = len(images)
+                                if images and isinstance(images[0], dict):
+                                    img0 = images[0]
+                                    summary["images_0_keys"] = list(img0.keys())
+                                    image_url = img0.get("image_url")
+                                    if isinstance(image_url, dict):
+                                        redacted: Dict[str, Any] = {}
+                                        if "url" in image_url:
+                                            url_val = image_url.get("url")
+                                            if isinstance(url_val, str) and url_val.startswith("data:"):
+                                                redacted["url"] = "data:[redacted]"
+                                            else:
+                                                redacted["url"] = url_val
+                                        if "b64_json" in image_url:
+                                            b64 = image_url.get("b64_json")
+                                            redacted["b64_len"] = len(b64) if isinstance(b64, str) else None
+                                        summary["images_0_image_url"] = redacted
+            text = json.dumps(summary, ensure_ascii=False)
+            if len(text) > 4000:
+                text = text[:4000] + "...(truncated)"
+            return text
+        except Exception:
+            try:
+                text = json.dumps(data, ensure_ascii=False)
+                if len(text) > 4000:
+                    text = text[:4000] + "...(truncated)"
+                return text
+            except Exception:
+                return str(type(data))
+
+    def _extract_generated_image(self, data: Dict[str, Any]) -> "GeneratedImage":
+        """Protected parser for the OpenRouter JSON response.
+
+        Expects shape with an image in choices[0].message.images[0].image_url.
+        Supports data URIs, http(s) URLs, and b64_json.
+        """
+        try:
+            choice = data["choices"][0]
+            message = choice["message"]
+            refusal = message.get("refusal")
+            refusal_present = bool(refusal)
+            finish_reason = str(choice.get("finish_reason", "")).lower()
+            finish_is_safety = finish_reason in {"content_filter", "safety", "policy_violation"}
+            if refusal_present or finish_is_safety:
+                reason_parts: List[str] = []
+                if isinstance(refusal, str) and refusal:
+                    reason_parts.append(refusal)
+                elif isinstance(refusal, dict):
+                    reason_parts.append(str(refusal.get("reason") or refusal.get("message") or refusal))
+                reasoning = message.get("reasoning")
+                if isinstance(reasoning, str) and reasoning:
+                    reason_parts.append(reasoning)
+                if finish_reason:
+                    reason_parts.append(f"finish_reason={finish_reason}")
+                reason = " ".join([p for p in reason_parts if p]).strip() or "Model refused due to safety policy"
+                raise SafetyRefusalError(reason)
+            images_field = message.get("images")
+            if not isinstance(images_field, list) or not images_field:
+                raise RuntimeError("No images in response message")
+
+            first_image = images_field[0]
+            if not isinstance(first_image, dict):
+                raise RuntimeError("Invalid image entry in response")
+
+            image_spec = first_image.get("image_url")
+            url: str = ""
+            if isinstance(image_spec, dict):
+                url = image_spec.get("url") or image_spec.get("data") or ""
+                b64_json = image_spec.get("b64_json")
+                if isinstance(b64_json, str) and b64_json:
+                    payload = base64.b64decode(b64_json)
+                    return GeneratedImage(mime_type="image/png", content=payload)
+            elif isinstance(image_spec, str):
+                url = image_spec
+
+            if isinstance(url, str) and url.startswith("data:"):
+                mime, b = self._parse_data_uri(url)
+                return GeneratedImage(mime_type=mime, content=b)
+
+            if isinstance(url, str) and (url.startswith("http://") or url.startswith("https://")):
+                downloaded = ImageDownloader().download(url)
+                return GeneratedImage(mime_type=downloaded.mime_type, content=downloaded.content)
+
+            raise RuntimeError("Image URL missing or unsupported format in response")
+        except Exception as e:
+            # Let safety refusals bubble up for API to return 400
+            if isinstance(e, SafetyRefusalError):
+                raise
+            summary = self._summarize_openrouter_response(data)
+
+            # Log full summary once for diagnostics
+            try:
+                self._logger.warning(f"cid=n/a step=extract_image_error error={e!r} response_summary={summary}")
+            except Exception:
+                pass
+            raise RuntimeError(f"Failed to extract generated image: {e}")

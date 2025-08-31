@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import os
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 import requests
 
@@ -25,7 +25,7 @@ class OpenRouterClient:
 
     def chat(
         self,
-        messages: List[Dict[str, str]],
+        messages: List[Dict[str, Any]],
         model: str,
         temperature: float = 0.2,
         max_tokens: int = 512,
@@ -51,6 +51,28 @@ class OpenRouterClient:
                     msg = first.get("message") or {}
                     content = str(msg.get("content", ""))
         return content
+
+    def chat_raw(
+        self,
+        messages: List[Dict[str, Any]],
+        model: str,
+        temperature: float = 0.2,
+        max_tokens: int = 1024,
+    ) -> Dict[str, Any]:
+        url = f"{self._base_url}/chat/completions"
+        headers = self._build_headers()
+        body = {
+            "model": model,
+            "messages": messages,
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+        }
+        resp = requests.post(url, headers=headers, json=body, timeout=self._timeout)
+        resp.raise_for_status()
+        data = resp.json()
+        if not isinstance(data, dict):
+            raise RuntimeError("Unexpected response format from OpenRouter")
+        return data
 
     def _build_headers(self) -> Dict[str, str]:
         return {
