@@ -29,7 +29,7 @@
         <div class="absolute inset-0 bg-slate-950/80"></div>
     </div>
 
-    <div class="max-w-2xl mx-auto px-4 py-10 relative" x-data="memeApp()" x-init="init()">
+    <div class="max-w-5xl mx-auto px-4 py-10 relative" x-data="memeApp()" x-init="init()">
         <header class="text-center mb-8">
             <h1 class="text-4xl font-extrabold tracking-tight">I need a <span class="text-fuchsia-400">MEME</span></h1>
             <p class="text-slate-400 mt-2">Describe the cringe. Optionally upload a face. Hit generate.</p>
@@ -84,19 +84,26 @@
         <section id="result" class="mt-8 hidden" :class="{ 'hidden': !hasResult }">
             <div class="rounded-xl border border-slate-800 bg-slate-900/60 p-4">
                 <p class="text-sm text-rose-400 mb-3" x-text="error" x-show="error"></p>
-                <img x-ref="memeImg" alt="Generated meme" class="mx-auto rounded-lg shadow-lg animate__animated"
-                    x-show="imageSrc" :src="imageSrc" @load="onImageLoad" />
-                <div class="mt-4 flex justify-end" x-show="imageSrc">
-                    <button type="button" @click="downloadImage"
-                        class="inline-flex items-center gap-2 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 px-4 py-2 text-sm font-semibold">
-                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-5 h-5">
-                            <path
-                                d="M12 3a1 1 0 0 1 1 1v8.586l2.293-2.293a1 1 0 1 1 1.414 1.414l-4 4a1 1 0 0 1-1.414 0l-4-4A1 1 0 1 1 8.293 10.293L10.586 12.586V4a1 1 0 0 1 1-1z" />
-                            <path
-                                d="M5 15a1 1 0 0 1 1 1v2h12v-2a1 1 0 1 1 2 0v3a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-3a1 1 0 0 1 1-1z" />
-                        </svg>
-                        <span>Download</span>
-                    </button>
+                <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4" x-show="images.length > 0">
+                    <template x-for="(src, idx) in images" :key="idx">
+                        <div class="rounded-lg border border-slate-800 bg-slate-900/50 p-3">
+                            <img :alt="`Generated meme ${idx+1}`" class="mx-auto rounded-md shadow-lg animate__animated"
+                                :src="src" @load="onImageLoad" />
+                            <div class="mt-3 flex justify-end">
+                                <button type="button" @click="downloadImage(src)"
+                                    class="inline-flex items-center gap-2 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 px-3 py-1.5 text-sm font-semibold">
+                                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"
+                                        class="w-4 h-4">
+                                        <path
+                                            d="M12 3a1 1 0 0 1 1 1v8.586l2.293-2.293a1 1 0 1 1 1.414 1.414l-4 4a1 1 0 0 1-1.414 0l-4-4A1 1 0 1 1 8.293 10.293L10.586 12.586V4a1 1 0 0 1 1-1z" />
+                                        <path
+                                            d="M5 15a1 1 0 0 1 1 1v2h12v-2a1 1 0 1 1 2 0v3a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-3a1 1 0 0 1 1-1z" />
+                                    </svg>
+                                    <span>Download</span>
+                                </button>
+                            </div>
+                        </div>
+                    </template>
                 </div>
             </div>
         </section>
@@ -115,7 +122,7 @@
             return {
                 loading: false,
                 hasResult: false,
-                imageSrc: '',
+                images: [],
                 error: '',
                 hint: '',
                 placeholder: 'Situation when you have a new fancy screwdriver but have nothing to screw, so you desperately try to find something to screw in or out...',
@@ -257,34 +264,45 @@
                     }
                     this.loading = true;
                     this.error = '';
-                    this.imageSrc = '';
+                    this.images = [];
                     this.hasResult = true;
                     const form = document.getElementById('meme-form');
-                    const fd = new FormData();
-                    const desc = form.querySelector('#description').value || '';
-                    fd.append('description', desc);
-                    const fileInput = form.querySelector('#reference_file');
-                    const file = fileInput && fileInput.files && fileInput.files[0];
-                    if (file && file.name) { fd.append('reference_file', file, file.name); }
-                    const url = (form.querySelector('#reference_url').value || '').trim();
-                    if (url) { fd.append('reference_url', url); }
+                    const buildFormData = () => {
+                        const fd = new FormData();
+                        const desc = form.querySelector('#description').value || '';
+                        fd.append('description', desc);
+                        const fileInput = form.querySelector('#reference_file');
+                        const file = fileInput && fileInput.files && fileInput.files[0];
+                        if (file && file.name) { fd.append('reference_file', file, file.name); }
+                        const url = (form.querySelector('#reference_url').value || '').trim();
+                        if (url) { fd.append('reference_url', url); }
+                        return fd;
+                    };
                     try {
-                        const res = await fetch('/meme', { method: 'POST', body: fd });
-                        let data;
-                        try { data = await res.json(); } catch (_) { data = null; }
-                        if (!res.ok) {
-                            throw new Error((data && (data.detail || data.message)) || `Failed: ${res.status}`);
+                        const requests = [0, 1, 2].map(() => fetch('/meme', { method: 'POST', body: buildFormData() }));
+                        const responses = await Promise.allSettled(requests);
+                        const uris = [];
+                        for (const r of responses) {
+                            if (r.status === 'fulfilled') {
+                                try {
+                                    const res = r.value;
+                                    let data;
+                                    try { data = await res.json(); } catch (_) { data = null; }
+                                    if (res.ok && data && data.data_uri) {
+                                        uris.push(data.data_uri);
+                                    }
+                                } catch (_) { /* ignore single failure */ }
+                            }
                         }
-                        if (data && data.data_uri) {
-                            this.imageSrc = data.data_uri;
-                            this.$nextTick(() => {
-                                if (window.confetti) {
-                                    confetti({ particleCount: 80, spread: 60, origin: { y: 0.6 } });
-                                }
-                            });
-                        } else {
-                            throw new Error('No image returned');
+                        if (uris.length === 0) {
+                            throw new Error('No images returned');
                         }
+                        this.images = uris;
+                        this.$nextTick(() => {
+                            if (window.confetti) {
+                                confetti({ particleCount: 100, spread: 70, origin: { y: 0.6 } });
+                            }
+                        });
                     } catch (e) {
                         this.error = e.message || String(e);
                     } finally {
@@ -295,9 +313,8 @@
                     e.target.classList.remove('animate__fadeOut');
                     e.target.classList.add('animate__fadeIn');
                 },
-                async downloadImage() {
+                async downloadImage(src) {
                     try {
-                        const src = this.imageSrc || '';
                         if (!src) return;
                         const ts = new Date().toISOString().replace(/[:.]/g, '-');
                         const filename = `meme-${ts}.png`;

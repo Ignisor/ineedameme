@@ -91,7 +91,7 @@ class MemeService:
             except Exception as e:
                 self._logger.warning(f"cid={cid} step=pick_template_error attempt={attempt + 1} error={e!r}")
                 if attempt == 1:
-                    raise HTTPException(status_code=500, detail="Failed to select a template")
+                    raise HTTPException(status_code=500, detail=f"Failed to select a template: {e}")
                 continue
         if top is None:
             raise HTTPException(status_code=500, detail="Failed to select a template")
@@ -138,7 +138,8 @@ class MemeService:
                     raise HTTPException(status_code=500, detail=f"Failed to create prompt: {e}")
                 continue
 
-        # Retry image generation once
+        # Image generation with safety-aware fallback
+        generated: Optional[GeneratedImage] = None
         for attempt in range(2):
             try:
                 self._logger.info(
@@ -155,14 +156,59 @@ class MemeService:
                 )
                 break
             except SafetyRefusalError as e:
-                # Do not retry safety refusals; bubble up to be returned as 400
                 self._logger.warning(f"cid={cid} step=generate_image_refused attempt={attempt + 1} error={e!r}")
-                raise e
+                # Safety fallback: regenerate a softened prompt and retry once
+                try:
+                    self._logger.info(
+                        f"cid={cid} step=create_prompt_soft attempt=1 template_id={template.id}"
+                        f" has_template_image=True has_reference_image={bool(ref_img is not None)}"
+                    )
+                    soft_prompt = self._prompt_gen.create_prompt(
+                        user_description=description,
+                        template=template,
+                        template_image=template_image,
+                        reference_image=ref_img,
+                        safety_soften=True,
+                    )
+                    self._logger.info(f"cid={cid} step=create_prompt_soft_success prompt={soft_prompt!r}")
+                except Exception as e2:
+                    self._logger.warning(f"cid={cid} step=create_prompt_soft_error attempt=1 error={e2!r}")
+                    # If we fail to create a soft prompt, surface original safety refusal
+                    raise e
+
+                try:
+                    self._logger.info(
+                        f"cid={cid} step=generate_image_soft attempt=1 prompt_len={len(soft_prompt)}"
+                        f" has_ref_image={bool(ref_img is not None)}"
+                    )
+                    generated = self._image_gen.generate(
+                        prompt=soft_prompt,
+                        template_image=template_image,
+                        reference_image=ref_img,
+                    )
+                    self._logger.info(
+                        f"cid={cid} step=generate_image_soft_success mime={generated.mime_type} size={len(generated.content)}"
+                    )
+                    # Expose the softened prompt in result
+                    prompt = soft_prompt
+                    break
+                except SafetyRefusalError as e_soft:
+                    self._logger.warning(f"cid={cid} step=generate_image_soft_refused attempt=1 error={e_soft!r}")
+                    raise e_soft
+                except Exception as e_soft:
+                    self._logger.warning(f"cid={cid} step=generate_image_soft_error attempt=1 error={e_soft!r}")
+                    raise HTTPException(
+                        status_code=500,
+                        detail=f"Failed to generate image after safety fallback: {e_soft}",
+                    )
             except Exception as e:
                 self._logger.warning(f"cid={cid} step=generate_image_error attempt={attempt + 1} error={e!r}")
                 if attempt == 1:
                     raise HTTPException(status_code=500, detail=f"Failed to generate image: {e}")
                 continue
+
+        if generated is None:
+            raise HTTPException(status_code=500, detail="Image generation returned no result")
 
         return MemeResult(
             image=generated,

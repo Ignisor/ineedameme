@@ -1,0 +1,29 @@
+# Python
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+.venv/
+
+# Git
+.git
+.gitignore
+
+# Mac
+.DS_Store
+
+# Node/others
+node_modules
+
+# Local files
+*.log
+*.tmp
+*.swp
+*.swo
+
+# Editor
+.vscode
+.idea

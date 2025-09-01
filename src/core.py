@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import random
 from dataclasses import dataclass
+import os
 import logging
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
@@ -148,10 +149,14 @@ class OpenRouterTemplateMatcher(TemplateMatcher):
         client: Optional[Any] = None,
         max_candidates: int = 207,
     ) -> None:
-        from .clients import OpenRouterClient
+        from .clients import OpenRouterClient, GoogleClient
 
         self._model = model
-        self._client = client or OpenRouterClient()
+        if client is not None:
+            self._client = client
+        else:
+            provider = os.getenv("MEMEGEN_PROVIDER", "openrouter").lower()
+            self._client = GoogleClient() if provider.startswith("google") else OpenRouterClient()
         self._max_candidates = max_candidates
 
     def rank(self, situation: str, candidates: Iterable[MemeTemplate]) -> List[TemplateMatch]:
@@ -247,9 +252,13 @@ class ImageEditPromptGenerator:
         client: Optional[Any] = None,
         model: str = "google/gemini-2.5-flash-image-preview:free",
     ) -> None:
-        from .clients import OpenRouterClient
+        from .clients import OpenRouterClient, GoogleClient
 
-        self._client = client or OpenRouterClient()
+        if client is not None:
+            self._client = client
+        else:
+            provider = os.getenv("MEMEGEN_PROVIDER", "openrouter").lower()
+            self._client = GoogleClient() if provider.startswith("google") else OpenRouterClient()
         self._model = model
 
     def create_prompt(
@@ -258,14 +267,29 @@ class ImageEditPromptGenerator:
         template: MemeTemplate,
         template_image: Optional["DownloadedImage"] = None,
         reference_image: Optional["DownloadedImage"] = None,
+        safety_soften: bool = False,
     ) -> str:
         system_msg = {
             "role": "system",
             "content": (
-                "You are a prompt engineer for image editing. "
-                "Given a meme template and user's description, output a single, concise, "
-                "imperative instruction that tells an image generation model exactly how to "
-                "edit the template. Keep it under 120 words. Avoid extra commentary."
+                (
+                    "You are a prompt engineer for image editing. "
+                    "Given a meme template and user's description, output a single, concise, "
+                    "imperative instruction that tells an image generation model exactly how to "
+                    "edit the template. Keep it under 120 words. Avoid extra commentary. "
+                    "If a reference image is attached, the instruction MUST explicitly state how to use it (e.g., replace a face with the reference, match identity/pose/style) and must not ignore the reference. "
+                    "When integrating the reference, inspect the template style: if it is a cartoon/comic/illustration, preserve the drawing style and render the inserted face as a stylized version that captures the reference's distinctive facial features (face shape, hairline/color, eyebrow and eye shape, nose, mouth, freckles/moles) while matching line weight, flat shading and palette; if it is a live-action/photo, integrate the face photorealistically and naturally, preserve the emotion/expression, and match lighting, color temperature and camera angle. Keep existing occlusions (hats/glasses) above the new face and do not alter the background or composition."
+                )
+                if not safety_soften
+                else (
+                    "You are a prompt engineer for image editing. "
+                    "Given a meme template and user's description, output a single, concise, "
+                    "imperative instruction for editing the template. Keep it under 120 words. "
+                    "If a reference image is attached, treat it strictly as stylistic guidance (colors, pose, expression, vibe). "
+                    "Do NOT identify or replicate a real person, do NOT perform face/identity matching, and do NOT imply impersonation. "
+                    "Use neutral, generic phrasing and avoid any identity linkage. "
+                    "Style rule: if the template is cartoon/comic/illustration, keep the illustrated look and echo generic traits from the reference (hair style/color, expression) in a stylized way; if it is a live-action/photo, keep the face natural and consistent with lighting and angle without implying identity. Preserve occlusions like hats/glasses and do not change the background or framing."
+                )
             ),
         }
 
@@ -276,12 +300,27 @@ class ImageEditPromptGenerator:
             {
                 "type": "text",
                 "text": (
-                    "Create a concise edit instruction for an image generation model.\n"
-                    f"Template: {template.name}.\n"
-                    f"User description: {user_description}.\n"
-                    "Constraints: One short paragraph; specify text lines if applicable; "
-                    "mention placement (top/bottom/overlay) based on template lines; "
-                    "describe visual changes succinctly; avoid mentioning file paths."
+                    (
+                        "Create a concise edit instruction for an image generation model.\n"
+                        f"Template: {template.name}.\n"
+                        f"User description: {user_description}.\n"
+                        "Constraints: One short paragraph; specify text lines if applicable; "
+                        "mention placement (top/bottom/overlay) based on template lines; "
+                        "describe visual changes succinctly; avoid mentioning file paths. "
+                        "The first attached image is the blank template; the second (if present) is the reference to be used. If the reference is present, explicitly instruct using it (e.g., 'swap the character's face with the reference face' or 'match the person to the reference'). "
+                        "Style-aware guidance: infer the template style from the template image. If the template is a cartoon/comic/illustration, tell the model to keep the original drawing style and render the inserted face as a stylized version that captures the reference's key features (face shape, hairline/color, eyebrows/eyes, nose, mouth) while matching line weight and flat/limited shading; avoid photorealism. If the template is a live-action/photo, instruct to make the new face look photorealistic and natural, preserve the emotion/expression, and match lighting/white balance and camera angle. In all cases, keep hats/glasses/props from the template on top of the new face and do not change the background or composition."
+                    )
+                    if not safety_soften
+                    else (
+                        "Create a concise edit instruction for an image generation model.\n"
+                        f"Template: {template.name}.\n"
+                        f"User description: {user_description}.\n"
+                        "Constraints: One short paragraph; specify text lines if applicable; "
+                        "mention placement (top/bottom/overlay) based on template lines; "
+                        "describe visual changes succinctly; avoid mentioning file paths. "
+                        "The first attached image is the blank template; the second (if present) is a stylistic reference only. If the reference is present, instruct to draw a generic, stylized character inspired by its hairstyle/expression/pose/color palette without matching or identifying a real person. "
+                        "Style-aware guidance: if the template is a cartoon/comic/illustration, keep the illustrated style and echo generic traits from the reference; if it is a live-action/photo, keep the face natural and consistent with lighting/angle while remaining non-identifying. Preserve occlusions like hats/glasses and do not alter the background or layout."
+                    )
                 ),
             }
         )
@@ -399,9 +438,13 @@ class MemeImageGenerator:
     _logger: logging.Logger
 
     def __init__(self, client: Optional[Any] = None, model: str = "google/gemini-2.5-flash-image-preview:free") -> None:
-        from .clients import OpenRouterClient
+        from .clients import OpenRouterClient, GoogleClient
 
-        self._client = client or OpenRouterClient()
+        if client is not None:
+            self._client = client
+        else:
+            provider = os.getenv("MEMEGEN_PROVIDER", "openrouter").lower()
+            self._client = GoogleClient() if provider.startswith("google") else OpenRouterClient()
         self._model = model
         self._logger = logging.getLogger("ai.memegen")
 
@@ -440,7 +483,8 @@ class MemeImageGenerator:
                 "role": "system",
                 "content": (
                     "You are an image generation model that outputs exactly one final image. "
-                    "Use the provided template and optional reference to produce the meme."
+                    "Use the provided template image AND, if present, the reference image. "
+                    "If a reference image is attached, you MUST incorporate it faithfully (e.g., identity/face swap or stylistic match as implied by the instruction). Do not ignore the reference."
                 ),
             },
             {"role": "user", "content": user_content},  # type: ignore[dict-item]

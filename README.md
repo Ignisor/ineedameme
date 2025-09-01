@@ -1,6 +1,43 @@
-# AI MemeGen — "I need a MEME"
+# I need a MEME
 
-Generate situational memes from a short description, optionally swapping in a face from an uploaded image or URL. The app picks a meme template, crafts an edit prompt, and calls an image model to produce the final meme.
+## Sophisticated state of the art meme generation AI
+
+"I need a MEME" is a situational meme generation and lookup
+application that combines the power of text AI and image generation to
+create personalized memes. Users can describe situations or desired
+memes, and the system intelligently matches them with appropriate
+templates from the Memegen.link API, then generates custom content
+using Gemini 2.5 Flash Image Preview.
+
+## Live demo
+
+[Live Demo](https://ineedameme.qqmber.wtf/)
+
+## A few examples
+
+When boss asked you to create an AI something
+
+![Example AI meme](./docs/examples/aismth.png)
+
+Sarcastic mocking meme about a playstation slowly becoming just a PC
+
+![Example PS PC meme](./docs/examples/ps_pc.png)
+
+Make a stonks meme but use a face from the reference, keep face details as realistic as possible as if it was copy-pasted there
+
+![Example Stonks meme](./docs/examples/stonks.png)
+
+Some sarcastic meme about QA
+
+![Example QA meme](./docs/examples/qa.png)
+
+Jesus reacted with emoji :satan: in Slack chat
+
+![Example Jesus meme](./docs/examples/jesus.png)
+
+Ha gaaaaayyyyy! meme
+
+![Example Ha meme](./docs/examples/ha.png)
 
 ## What it does
 
@@ -16,7 +53,9 @@ Backend is FastAPI; the UI is a single static page served by the backend.
 ## Requirements
 
 - Python 3.12+
-- An OpenRouter API key (free-tier models supported)
+- One of the following API setups:
+  - OpenRouter API key (`OPENROUTER_API_KEY`) — default provider
+  - Google API key (`GOOGLE_API_KEY`) with `MEMEGEN_PROVIDER=google`
 
 ## Quickstart
 
@@ -37,9 +76,86 @@ export OPENROUTER_API_KEY="<your_openrouter_api_key>"
 python -m src.api
 ```
 
+Using Google instead of OpenRouter:
+
+```bash
+export MEMEGEN_PROVIDER=google
+export GOOGLE_API_KEY="<your_google_api_key>"
+uvicorn src.api:app --reload
+# Open http://localhost:8000/
+```
+
+### Docker (local)
+
+Build and run locally (maps 8000 -> container 8080):
+
+```bash
+docker build -t ai-memegen .
+docker run --rm -p 8000:8080 \
+  -e OPENROUTER_API_KEY=YOUR_KEY \
+  ai-memegen
+```
+
+With Google provider:
+
+```bash
+docker run --rm -p 8000:8080 \
+  -e MEMEGEN_PROVIDER=google \
+  -e GOOGLE_API_KEY=YOUR_GOOGLE_KEY \
+  ai-memegen
+```
+
+## Deploy to Cloud Run (container)
+
+Requirements:
+
+- `gcloud` CLI configured and logged in
+- A GCP project with Cloud Run and Cloud Build APIs enabled
+- Billing enabled on the project
+
+Steps:
+
+1. Build and deploy using the provided script:
+
+   ```bash
+   ./deploy-cloudrun.sh <gcp-project-id> <service-name> <region>
+   # Example:
+   ./deploy-cloudrun.sh my-proj ineedameme europe-west1
+   ```
+
+   This will:
+   - Build the container using Cloud Build
+   - Push to `gcr.io/<project-id>/<service-name>:latest`
+   - Deploy a Cloud Run service named `<service-name>` on port 8080
+
+2. Set the required environment variables (choose provider):
+
+   ```bash
+   # OpenRouter (default)
+   gcloud run services update <service-name> \
+     --region <region> \
+     --set-env-vars OPENROUTER_API_KEY=<your_openrouter_api_key>
+
+   # OR Google
+   gcloud run services update <service-name> \
+     --region <region> \
+     --set-env-vars MEMEGEN_PROVIDER=google,GOOGLE_API_KEY=<your_google_api_key>
+   ```
+
+3. Open the service URL printed by the deploy command. The UI is served from `/`.
+
+Notes:
+
+- Cloud Run sets `$PORT`; the container listens on it via `uvicorn`.
+- Default resource settings in `deploy-cloudrun.sh` are `--memory 1Gi`, `--timeout 300`, `--max-instances 3`.
+- If uploads are large, consider increasing `--timeout` and `--memory`.
+
+
 ## Configuration
 
-- `OPENROUTER_API_KEY` (required): API key used by `src/clients.py`.
+- `OPENROUTER_API_KEY` (required if using OpenRouter): API key used by `src/clients.py`.
+- `GOOGLE_API_KEY` (required if `MEMEGEN_PROVIDER=google`).
+- `MEMEGEN_PROVIDER` (optional): `openrouter` (default) or `google`.
 - `PORT` (optional): Port for the built-in runner in `src/api.py` (defaults to `8000`).
 
 ## Endpoints
@@ -141,7 +257,7 @@ Important: reference images and template images are sent to OpenRouter (embedded
 ## Attribution
 
 - Templates: Memegen.link (`meme_templates.json`)
-- Models via OpenRouter — using `google/gemini-2.5-flash-image-preview:free`
+- Models via OpenRouter or Google Generative Language API — default model `google/gemini-2.5-flash-image-preview:free`
 
 ## License
 
