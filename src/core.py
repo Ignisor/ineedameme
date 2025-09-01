@@ -155,8 +155,9 @@ class OpenRouterTemplateMatcher(TemplateMatcher):
         if client is not None:
             self._client = client
         else:
-            provider = os.getenv("MEMEGEN_PROVIDER", "openrouter").lower()
-            self._client = GoogleClient() if provider.startswith("google") else OpenRouterClient()
+            provider_raw = os.getenv("MEMEGEN_PROVIDER", "").strip().strip("\"'").lower()
+            use_openrouter = provider_raw.startswith("openrouter")
+            self._client = OpenRouterClient() if use_openrouter else GoogleClient()
         self._max_candidates = max_candidates
 
     def rank(self, situation: str, candidates: Iterable[MemeTemplate]) -> List[TemplateMatch]:
@@ -257,8 +258,9 @@ class ImageEditPromptGenerator:
         if client is not None:
             self._client = client
         else:
-            provider = os.getenv("MEMEGEN_PROVIDER", "openrouter").lower()
-            self._client = GoogleClient() if provider.startswith("google") else OpenRouterClient()
+            provider_raw = os.getenv("MEMEGEN_PROVIDER", "").strip().strip("\"'").lower()
+            use_openrouter = provider_raw.startswith("openrouter")
+            self._client = OpenRouterClient() if use_openrouter else GoogleClient()
         self._model = model
 
     def create_prompt(
@@ -443,8 +445,9 @@ class MemeImageGenerator:
         if client is not None:
             self._client = client
         else:
-            provider = os.getenv("MEMEGEN_PROVIDER", "openrouter").lower()
-            self._client = GoogleClient() if provider.startswith("google") else OpenRouterClient()
+            provider_raw = os.getenv("MEMEGEN_PROVIDER", "").strip().strip("\"'").lower()
+            use_openrouter = provider_raw.startswith("openrouter")
+            self._client = OpenRouterClient() if use_openrouter else GoogleClient()
         self._model = model
         self._logger = logging.getLogger("ai.memegen")
 

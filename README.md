@@ -54,8 +54,8 @@ Backend is FastAPI; the UI is a single static page served by the backend.
 
 - Python 3.12+
 - One of the following API setups:
-  - OpenRouter API key (`OPENROUTER_API_KEY`) — default provider
-  - Google API key (`GOOGLE_API_KEY`) with `MEMEGEN_PROVIDER=google`
+  - Google API key (`GOOGLE_API_KEY`) — default provider
+  - OpenRouter API key (`OPENROUTER_API_KEY`) with `MEMEGEN_PROVIDER=openrouter`
 
 ## Quickstart
 
@@ -64,7 +64,7 @@ python3.12 -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
 
-export OPENROUTER_API_KEY="<your_openrouter_api_key>"
+export GOOGLE_API_KEY="<your_google_api_key>"
 uvicorn src.api:app --reload
 # Open http://localhost:8000/
 ```
@@ -72,7 +72,7 @@ uvicorn src.api:app --reload
 Alternatively, you can run the built-in entrypoint:
 
 ```bash
-export OPENROUTER_API_KEY="<your_openrouter_api_key>"
+export GOOGLE_API_KEY="<your_google_api_key>"
 python -m src.api
 ```
 
@@ -92,16 +92,16 @@ Build and run locally (maps 8000 -> container 8080):
 ```bash
 docker build -t ai-memegen .
 docker run --rm -p 8000:8080 \
-  -e OPENROUTER_API_KEY=YOUR_KEY \
+  -e GOOGLE_API_KEY=YOUR_GOOGLE_KEY \
   ai-memegen
 ```
 
-With Google provider:
+With OpenRouter provider:
 
 ```bash
 docker run --rm -p 8000:8080 \
-  -e MEMEGEN_PROVIDER=google \
-  -e GOOGLE_API_KEY=YOUR_GOOGLE_KEY \
+  -e MEMEGEN_PROVIDER=openrouter \
+  -e OPENROUTER_API_KEY=YOUR_KEY \
   ai-memegen
 ```
 
@@ -131,15 +131,15 @@ Steps:
 2. Set the required environment variables (choose provider):
 
    ```bash
-   # OpenRouter (default)
+   # Google (default)
    gcloud run services update <service-name> \
      --region <region> \
-     --set-env-vars OPENROUTER_API_KEY=<your_openrouter_api_key>
+     --set-env-vars GOOGLE_API_KEY=<your_google_api_key>
 
-   # OR Google
+   # OR OpenRouter
    gcloud run services update <service-name> \
      --region <region> \
-     --set-env-vars MEMEGEN_PROVIDER=google,GOOGLE_API_KEY=<your_google_api_key>
+     --set-env-vars MEMEGEN_PROVIDER=openrouter,OPENROUTER_API_KEY=<your_openrouter_api_key>
    ```
 
 3. Open the service URL printed by the deploy command. The UI is served from `/`.
@@ -153,9 +153,9 @@ Notes:
 
 ## Configuration
 
-- `OPENROUTER_API_KEY` (required if using OpenRouter): API key used by `src/clients.py`.
-- `GOOGLE_API_KEY` (required if `MEMEGEN_PROVIDER=google`).
-- `MEMEGEN_PROVIDER` (optional): `openrouter` (default) or `google`.
+- `GOOGLE_API_KEY` (required by default provider Google).
+- `OPENROUTER_API_KEY` (required if `MEMEGEN_PROVIDER=openrouter`).
+- `MEMEGEN_PROVIDER` (optional): `openrouter` to use OpenRouter instead of default Google.
 - `PORT` (optional): Port for the built-in runner in `src/api.py` (defaults to `8000`).
 
 ## Endpoints

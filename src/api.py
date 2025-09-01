@@ -258,7 +258,7 @@ if _STATIC_DIR.exists():
 
 
 @app.post("/meme")
-async def create_meme(
+def create_meme(
     description: str = Form(...),
     reference_url: Optional[str] = Form(None),
     reference_file: Optional[UploadFile] = File(None),
